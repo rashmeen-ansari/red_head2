@@ -1,0 +1,230 @@
+PRATICAL 8: Simulating OpenDaylight SDN Controller with the Mininet Network Emulator
+OpenDaylight (ODL) is a popular open-source SDN controller framework. To learn more about OpenDaylight, it is helpful to use it to manage an emulated network of virtual switches and virtual hosts. Most people use the Mininet network emulator to create a virtual SDN network for OpenDaylight to control.
+
+
+Using Virtual Machines
+Two virtual machines will be used. One will run the Mininet emulated network and the other will run the OpenDaylight controller. I will connect both VMs to a host-only network so they can communicate with each other and with programs running on the host computer, such as ssh and the X11 client.
+
+Use VirtualBox to run the Mininet VM that can downloaded from the mininet project web site, which is the easiest way to experiment with Mininet. The Mininet project team provides an Ubuntu 14.04 LTS VM image with Mininet 2.2.1, Wireshark and OpenFlow dissector tools already installed and ready to use.
+Install and run the OpenDaylight SDN controller on a new VM I create in VirtualBox.
+Setting up the OpenDaylight Virtual Machine
+To build the OpenDaylight virtual machine,  download the Ubuntu Server ISO image from the ubuntu.com web site. Then  installed it in a new VM in VirtualBox. If you need directions on how to install an ISO disk image in a VirtualBox virtual machine, please see post about installing Debian in a VirtualBox VM.
+
+Give the virtual machine a descriptive name. I named the virtual machine OpenDaylight. Configure it so it uses two CPUs and 2 GB or RAM. This is the minimum configuration to support OpenDaylight. Then add a host-only network adapter to the VM.
+
+When the VM is powered off, click on the Settings button:
+
+
+
+The OpenDaylight virtual machine
+In the VM’s VirtualBox network settings, enable two network interfaces. Connect the first network adapter to the NAT interface (which is the default setting) and the second network adapter to the host-only network, vboxnet0
+
+Connecting network adapter 2 to the host-only network
+Configure OpenDaylight VM interfaces
+By default, the VM’s first network adapter is attached to the VirtualBox NAT interface and is already configured when the VM boots up. We need to configure the second network adapter, which is attached to the VirtualBox host-only interface vboxnet0.
+List all the devices using th ip command:
+brian@odl:~$ ipaddr show
+1: lo: <LOOPBACK,UP,LOWER_UP>mtu 65536 qdiscnoqueue state UNKNOWN 
+group default
+    link/loopback 00:00:00:00:00:00brd 00:00:00:00:00:00
+inet 127.0.0.1/8 scope host lo
+valid_lft forever preferred_lft forever
+    inet6 ::1/128 scope host
+valid_lft forever preferred_lft forever
+2: enp0s3: <BROADCAST,MULTICAST,UP,LOWER_UP>mtu 1500 qdiscpfifo_
+fast state UP group default qlen 1000
+    link/ether 08:00:27:ec:a9:f1 brdff:ff:ff:ff:ff:ff
+inet 10.0.2.15/24 brd 10.0.2.255 scope global enp0s3
+valid_lft forever preferred_lft forever
+    inet6 fe80::a00:27ff:feec:a9f1/64 scope link
+valid_lft forever preferred_lft forever
+3: enp0s8: <BROADCAST,MULTICAST>mtu 1500 qdisc noop state DOWN group 
+default qlen 1000
+    link/ether 08:00:27:b0:f6:70 brdff:ff:ff:ff:ff:ff
+brian@odl:~$
+
+Note: starting in 15.10, Ubuntu uses predictable network interface names like enp0s3 and enp0s8, instead of the classic interface names like eth0 and eth1.
+We see that interface enp0s8 has no IP address. This is the second network adapter connected to vboxnet0. VirtualBox can assign an IP address on this interface using DHCP if the DCHP client requests it. So, run the following command to set up interface enp0s8:
+
+brian@odl:~$ sudodhclient enp0s8  
+Now check the IP address assigned to enp0s8:
+brian@odl:~$ ipaddr show enp0s8
+3: enp0s8: <BROADCAST,MULTICAST,UP,LOWER_UP>mtu 1500 qdiscpfifo_fast state UP group default qlen 1000
+    link/ether 08:00:27:b0:f6:70 brdff:ff:ff:ff:ff:ff
+inet 192.168.56.101/24 brd 192.168.56.255 scope global enp0s8
+valid_lft forever preferred_lft forever
+    inet6 fe80::a00:27ff:feb0:f670/64 scope link
+valid_lft forever preferred_lft forever
+brian@odl:~$
+
+Now we see the VirtualBox DHCP server connected to the host-only network assigned the IP address 192.168.56.101 to this interface. This is the IP address we should use when connecting to any application running on the VM.
+
+On your system the assigned IP address may be different. You may have set up the VirtualBox preferences to use a different network prefix for the host-only network, or may have configured the DHCP server to provide a diferent address range. Also, if any other VMs were started and connected to the host-only network before this VM, then the IP address assigned will be different. If the IP address is different, that’s OK. Just use the address assigned
+.
+Now, configure the interface enp0s8 so it will remain configured after a restart. Edit the /etc/network/interfaces file:
+brian@odl:~$ sudo nano /etc/network/interfaces
+Add the following lines to the end of the file /etc/network/interfaces:
+# the host-only network interface
+auto enp0s8
+iface enp0s8 inetdhcp
+
+Connect to the OpenDaylight VM using SSH
+Use a terminal application when working on Virtual Machines. 
+Open a terminal on host computer and login using SSH:
+brian@T420:~$ ssh -X brian@192.168.56.101
+
+Now you are connected to the OpenDaylight virtual machine and can see that the host name in the prompt is changed to is odl, which was configured when installing Ubuntu on the VM.
+brian@odl:~$
+Also enabled X forwarding when I started SSH so I can run X programs on the OpenDaylight VM.
+
+Install Java
+The OpenDaylight SDN controller is a Java program so install the Java run-time environment with the following command:
+$ sudo apt-get update
+$ sudo apt-get install default-jre-headless
+Set the JAVA_HOME environment variable. Edit the bashrc file
+brian@odl:~$ nano ~/.bashrc
+Add the following line to the bashrc file:
+export JAVA_HOME=/usr/lib/jvm/default-java
+Then run the file:
+brian@odl:~$ source ~/.bashrc
+
+Install OpenDaylight
+
+Download the OpenDaylight software from the OpenDaylight web site. On a Linux or Mac OS host, we can use the wget command to download the tar file.
+
+brian@odl:~$ wget https://nexus.opendaylight.org/content/groups/public/org/opendaylight/integration/distribution-karaf/0.4.0-Beryllium/distribution-karaf-0.4.0-Beryllium.tar.gz
+
+Install OpenDaylight by extracting the tar file:
+brian@odl:~$ tar -xvf distribution-karaf-0.4.0-Beryllium.tar.gz
+
+This creates a folder named distribution-karaf-0.4.0-Beryllium which contains the OpenDaylight software and plugins.
+
+OpenDaylight is packaged in a karaf container. Karaf is a container technology that allows the developers to put all required software in a single distribution folder. This makes it easy to install or re-install OpenDaylight when needed because everything is in one folder. As we will see later, karaf also allows programs to be bundled with optional modules that can be installed when needed.
+
+Start OpenDaylight
+To run OpenDaylight, run the karaf command inside the package distribution folder.
+brian@odl:~$ cd distribution-karaf-0.4.0-Beryllium
+brian@odl:~$ ./bin/karaf
+Now the OpenDaylight controller is running.
+
+
+OpenDaylight running in a virtual machine
+
+Install OpenDaylight features
+Next, install the minimum set of features required to test OpenDaylight and the OpenDaylight GUI:
+opendaylight-user@root>feature:installodl-restconf odl-l2switch-switch odl-mdsal-apidocsodl-dlux-all
+
+The above is an example of installing optional modules in a karaf container. You only need to install an optional feature once. Once installed, these features are permanently added to the controller and will run every time it starts.
+We installed the following features. Click on each feature to learn more about it:
+odl-restconf: Allows access to RESTCONF API
+odl-l2switch-switch: Provides network functionality similar to an Ethernet switch
+odl-mdsal-apidocs: Allows access to Yang API
+odl-dlux-all: OpenDaylight graphical user interface
+
+To list all available optional features, run the command:
+opendaylight-user@root>feature:list
+To list all installed features, run the command:
+opendaylight-user@root>feature:list --installed
+
+Information about OpenDaylight optional features is available on the OpenDaylight wiki.
+Stop OpenDaylight
+When you want to stop the controller, enter the <ctrl-d> key combination or type system:shutdown or logout at the opendaylight-user prompt.
+Set up the Mininet Virtual Machine
+Start the Mininet VM in the VirtualBox Manager. Now we should have two VMs running: OpenDaylight VM and Mininet VM. If we started the OpenDaylight VM first, it will have IP address 192.168.56.101 and the mininet VM will receive the second available IP address on the host-only network, 192,168.56.102. We can verify this by running the ip command on the Mininet VM console:
+mininet@mininet-vm:~$ ipaddr show
+1: lo: <LOOPBACK,UP,LOWER_UP>mtu 65536 qdiscnoqueue state UNKNOWN group default
+    link/loopback 00:00:00:00:00:00brd 00:00:00:00:00:00
+inet 127.0.0.1/8 scope host lo
+valid_lft forever preferred_lft forever
+2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP>mtu 1500 qdiscpfifo_fast state UP group default qlen 1000
+    link/ether 08:00:27:e2:98:cc brdff:ff:ff:ff:ff:ff
+inet 192.168.56.102/24 brd 192.168.56.255 scope global eth0
+valid_lft forever preferred_lft forever
+3: eth1: <BROADCAST,MULTICAST,UP,LOWER_UP>mtu 1500 qdiscpfifo_fast state UP group default qlen 1000
+    link/ether 08:00:27:1b:c1:07 brdff:ff:ff:ff:ff:ff
+inet 10.0.2.16/24 brd 10.0.2.255 scope global enp0s3
+valid_lft forever preferred_lft forever
+mininet@mininet-vm:~$
+
+Note: The Mininet VM is based on Ubuntu Server 14.04, which does not yet use the predictable network interface names like enp0s3 and enp0s8, so we see interface names like eth0 and eth1.
+We see eth0 is connected to the host-only interface because it has IP address 192.168.56.102 which is in the address range assigned by the VirtualBox hot-only network DHCP server. So we know we need to use IP address 192.168.56.102 to access applications running on this virtual machine.
+
+Connect to the Mininet VM using SSH
+Now open a terminal window on your host computer and SSH into the Mininet VM. 
+Turn X forwarding on. (If you are using Windows, use Xming for an X Window System Server and Putty as an SSH client)
+brian@T420:~$ ssh -X 198.168.56.102
+Start Mininet
+On the Mininet VM, start a simple network topology. In this case, we will do the following:
+Set up three switches in a linear topology
+Each switch will be connected to one host
+The MAC address on each host will be set to a simple number
+The remote controller, OpenDaylight, is at IP address 192.168.56.101:6633
+We will use OpenFlow version 1.3
+
+The Mininet command to start this is:
+mininet@mininet-vm:~$ sudomn --topo linear,3 --mac --controller=remote,ip=192.168.56.101,port=6633 --switch ovs,protocols=OpenFlow13
+
+Test the network
+Test that the OpenDaylight controller is working by pinging all nodes. Every host should be able to reach every other host:
+
+mininet>pingall
+*** Ping: testing ping reachability
+h1 -> h2 h3
+h2 -> h1 h3
+h3 -> h1 h2
+*** Results: 0% dropped (6/6 received)
+The OpenDaylight Graphical User Interface
+Open a browser on your host system and enter the URL of the OpenDaylight User Interface (DLUX UI). It is running on the OpenDaylight VM so the IP address is 192.168.56.102 and the port, defined by the application, is 8181:
+So the URL is: http://192.168.56.101:8181/index.html.
+The default username and password are both admin.
+
+
+Log in to OpenDaylight controller
+Topology
+Now we see the network topology in the OpenDaylight controller’s topology tab.
+
+
+Topology of the Mininet network
+You can see the network that is emulated by the Mininet network emulator. You may test OpenDaylight functionality by building different network topologies in Mininet with different attributes, and by using OpenDaylight to run experiments on the emulated network. For example, you may break links between switches in Mininet to test how the network responds to faults.
+Nodes
+Click on the Nodes tab to see information about each switch in the network:
+
+
+
+List of nodes
+Click on the Node Connectors link in each row to see information about each port on the switch:
+
+Interfaces
+Yang UI
+Click on the Yang UI tab. Then click on the Expand all button to see all available APIs. Not all of them will work because we did not install all features. One API that will work is the Inventory API. Click on it, then navigate down to the nodes attribute and click on the Send button to send the GET API method to the controller.
+
+Scroll down to see all the inventory information about the network: nodes, ports, statistics, etc. Click on the switches and interfaces to see the details of each.
+
+Understanding the Yang data model and learning how to read and write to the data store is key to understanding Software Defined Networking with the OpenDaylight controller.
+Capturing OpenFlow Messages
+To dive deeper into how SDN controllers and switches operate, you may want to view the OpenFlow messages exchanged between the controller and switches in the network.
+The Mininet VM comes with Wireshark installed, with a custom version of the OpenFlow dissector already set up.
+So the easiest way to view OpenFlow messages is to start Wireshark on the Mininet VM and capture data on the interface connected to the host-only network, which is eth0 in this case.
+
+Open a new terminal window and connect to the Mininet VM using SSH with X Forwarding enabled (or use Putty and Xming if you are using Windows):
+brian@T420:~$ ssh -X 192.168.56.102
+
+Start Wireshark on the Mininet VM:
+mininet@mininet-vm:~$ sudowireshark&
+You will see a warning dialog but you can ignore it. Starting Wireshark with root privileges is a security risk but, for our simple testing, we can ignore that — or you can follow the directions in the warning message to set up Wireshark in a more secure way.
+
+Create a display filter for OpenFlow messages. Enter the text, of in the Filter window and click on Apply. Now you will see only OpenFlow messages in the Wireshark display, as shown below.
+
+Viewing captured OpenFlow messages in Wireshark
+Shut down the project
+When it is time to end the project, shut down Mininet and OpenDaylight using the following commands:
+On the Mininet VM, stop Mininet and clean up the node, then shut down the VM:
+mininet> exit
+mininet@mininet:~$ sudomn -c
+mininet@mininet:~$ sudo shutdown -h now
+
+On the OpenDaylight VM, stop OpenDaylight and shut down the VM:
+opendaylight-user@root>system:shutdown
+brian@odl:~$ sudo shutdown -h now
+
+Both VMs should now show that they are stopped in the VirtualBox Manager application.
