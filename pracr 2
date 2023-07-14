@@ -1,0 +1,197 @@
+PRATICAL 2:Using the AS_PATH Attribute
+Topology
+
+Objectives 
+1.Use BGP commands to prevent private AS numbers from being advertised to the outside world. 
+2.Use the AS_PATH attribute to filter BGP routes based on their source AS numbers. 
+Step 0: Suggested starting configurations.
+a. Apply the following configuration to each router along with the appropriate hostname. The exec-timeout 0 0 command should only be used in a lab environment.
+Router(config)# no ip domain-lookup
+Router(config)# line con 0
+Router(config-line)# logging synchronous
+Router(config-line)# exec-timeout 0 0
+Step 1: Configure interface addresses.
+b. Using the addressing scheme in the diagram, create the loopback interfaces and apply IPv4 addresses to these and the serial interfaces on SanJose (R1), ISP (R2), and CustRtr (R3). The ISP loopbacks simulate real networks. Set a clock rate on the DCE serial interfaces.
+
+SanJose(config)# interface Loopback0
+SanJose(config-if)#ip address 10.1.1.1 255.255.255.0
+SanJose(config-if)# exit
+SanJose(config)# interface Serial0/0
+SanJose(config-if)#ip address 192.168.1.5 255.255.255.252
+SanJose(config-if)# clock rate 128000
+SanJose(config-if)# no shutdown
+SanJose(config-if)# end
+SanJose#
+
+ISP(config)# interface Loopback0
+ISP(config-if)# ip address 10.2.2.1 255.255.255.0
+ISP(config-if)# interface Serial0/0
+ISP(config-if)# ip address 192.168.1.6 255.255.255.252
+ISP(config-if)# no shutdown
+ISP(config-if)# exit
+ISP(config)# interface Serial0/1
+ISP(config-if)# ip address 172.24.1.17 255.255.255.252
+ISP(config-if)# clock rate 128000
+ISP(config-if)# no shutdown
+ISP(config-if)# end
+ISP#
+
+CustRtr(config)# interface Loopback0
+CustRtr(config-if)#ip address 10.3.3.1 255.255.255.0
+CustRtr(config-if)# exit
+CustRtr(config)# interface Serial0/1
+CustRtr(config-if)#ip address 172.24.1.18 255.255.255.252
+CustRtr(config-if)# no shutdown
+CustRtr(config-if)# end
+CustRtr#
+
+c. Use ping to test the connectivity between the directly connected routers.
+Step 2: Configure BGP.
+a. Configure BGP for normal operation. Enter the appropriate BGP commands on each router so that they identify their BGP neighbors and advertise their loopback networks.
+SanJose(config)# router bgp 100
+SanJose(config-router)#neighbor 192.168.1.6 remote-as 300
+SanJose(config-router)# network 10.1.1.0 mask 255.255.255.0
+
+ISP(config)# router bgp 300
+ISP(config-router)# neighbor 192.168.1.5 remote-as 100
+ISP(config-router)# neighbor 172.24.1.18 remote-as 65000
+ISP(config-router)# network 10.2.2.0 mask 255.255.255.0
+
+CustRtr(config)# router bgp 65000
+CustRtr(config-router)#neighbor 172.24.1.17 remote-as 300
+CustRtr(config-router)# network 10.3.3.0 mask 255.255.255.0
+
+b. Verify that these routers have established the appropriate neighbor relationships by issuing the show ipbgpneighbors command on each router.
+ISP# show ipbgpneighbors
+
+Step 3: Remove the private AS.
+a. Display the SanJose routing table using the show ip route command. SanJose should have a route to both 10.2.2.0 and 10.3.3.0. Troubleshoot if necessary.
+SanJose#showip route
+b. Ping the 10.3.3.1 address from SanJose.
+c. Ping again, this time as an extended ping, sourcing from the Loopback0 interface address.
+SanJose# ping
+Protocol [ip]: 
+Target IP address: 10.3.3.1
+Repeat count [5]: 
+Datagram size [100]: 
+Timeout in seconds [2]: 
+Extended commands [n]: y
+Source address or interface: 10.1.1.1
+Type of service [0]: 
+Set DF bit in IP header? [no]: 
+Validate reply data? [no]: 
+Data pattern [0xABCD]: 
+Loose, Strict, Record, Timestamp, Verbose[none]: 
+Sweep range of sizes [n]: 
+Type escape sequence to abort.
+Sending 5, 100-byte ICMP Echos to 10.3.3.1, timeout is 2 seconds:
+Packet sent with a source address of 10.1.1.1 
+!!!!!
+Success rate is 100 percent (5/5), round-trip min/avg/max =28/28/28 ms
+SanJose#
+SanJose# ping 10.3.3.1 source 10.1.1.1
+d. Check the BGP table from SanJose by using the show ipbgp command. Note the AS path for the 10.3.3.0 network. The AS 65000 should be listed in the path to 10.3.3.0.
+SanJose# show ipbgp
+BGP table version is 5, local router ID is 10.1.1.1
+Status codes: s suppressed, d damped, h history, * valid, > best, i - internal, 
+              r RIB-failure, S Stale, m multipath, b backup-path, f RT-Filter, 
+              x best-external, a additional-path, c RIB-compressed, 
+Origin codes: i - IGP, e - EGP, ? - incomplete
+RPKI validation codes: V valid, I invalid, N Not found
+
+     Network          Next Hop            Metric LocPrfWeight Path
+ *>  10.1.1.0/24      0.0.0.0                  0         32768i
+ *>  10.2.2.0/24      192.168.1.6          0             0 300 i
+ *>  10.3.3.0/24      192.168.1.6                            0 300 65000 i
+SanJose#
+e. Configure ISP to strip the private AS numbers from BGP routes exchanged with SanJose using the following commands.
+ISP(config)# router bgp 300
+ISP(config-router)# neighbor 192.168.1.5 remove-private-as
+
+f. After issuing these commands, use the clear ipbgp * command on ISP to reestablish the BGP relationship between the three routers. Wait several seconds and then return to SanJose to check its routing table.
+Note: The clear ipbgp * soft command can also be used to force each router to resend its BGP table.
+ISP# clear ipbgp *     
+ISP#
+*Sep  8 18:40:03.551: %BGP-5-ADJCHANGE: neighbor 172.24.1.18 Down User reset
+*Sep  8 18:40:03.551: %BGP_SESSION-5-ADJCHANGE: neighbor 172.24.1.18 IPv4 Unicast topology base removed from session  User reset
+*Sep  8 18:40:03.551: %BGP-5-ADJCHANGE: neighbor 192.168.1.5 Down User reset
+*Sep  8 18:40:03.551: %BGP_SESSION-5-ADJCHANGE: neighbor 192.168.1.5 IPv4 Unicast topology base removed from session  User reset
+*Sep  8 18:40:04.515: %BGP-5-ADJCHANGE: neighbor 172.24.1.18 Up 
+*Sep  8 18:40:04.519: %BGP-
+ISP#5-ADJCHANGE: neighbor 192.168.1.5 Up 
+ISP#
+
+SanJose# show ip route
+      10.0.0.0/8 is variably subnetted, 4 subnets, 2 masks
+C        10.1.1.0/24 is directly connected, Loopback0
+L        10.1.1.1/32 is directly connected, Loopback0
+B        10.2.2.0/24 [20/0] via 192.168.1.6, 00:00:20
+B        10.3.3.0/24 [20/0] via 192.168.1.6, 00:01:02
+      192.168.1.0/24 is variably subnetted, 2 subnets, 2 masks
+C        192.168.1.4/30 is directly connected, Serial0/0
+L        192.168.1.5/32 is directly connected, Serial0/0
+SanJose#
+
+SanJose# ping 10.3.3.1 source lo0
+Type escape sequence to abort.
+Sending 5, 100-byte ICMP Echos to 10.3.3.1, timeout is 2 seconds:
+Packet sent with a source address of 10.1.1.1
+!!!!!
+Success rate is 100 percent (5/5), round-trip min/avg/max = 28/28/32 ms
+g. Now check the BGP table on SanJose. The AS_ PATH to the 10.3.3.0 network should be AS 300. It no longer has the private AS in the path.
+SanJose# show ipbgp
+BGP table version is 9, local router ID is 10.1.1.1
+Status codes: s suppressed, d damped, h history, * valid, > best, i - internal, 
+              r RIB-failure, S Stale, m multipath, b backup-path, f RT-Filter, 
+              x best-external, a additional-path, c RIB-compressed, 
+Origin codes: i - IGP, e - EGP, ? - incomplete
+RPKI validation codes: V valid, I invalid, N Not found
+
+     Network          Next Hop            Metric LocPrf Weight Path
+ *>  10.1.1.0/24      0.0.0.0                  0         32768 i
+ *>  10.2.2.0/24      192.168.1.6              0             0 300 i
+ *>  10.3.3.0/24      192.168.1.6                            0 300 i
+SanJose#
+
+Step 4: Use the AS_PATH attribute to filter routes.
+a. Configure a special kind of access list to match BGP routes with an AS_PATH attribute that both begins and ends with the number 100. Enter the following commands on ISP.
+ISP(config)# ip as-path access-list 1 deny ^100$
+ISP(config)# ip as-path access-list 1 permit .*
+
+b. Apply the configured access list using the neighbor command with the filter-list option.
+ISP(config)# router bgp 300
+ISP(config-router)# neighbor 172.24.1.18 filter-list 1 out
+
+c. Use the clear ipbgp * command to reset the routing information. Wait several seconds and then check the routing table for ISP. The route to 10.1.1.0 should be in the routing table.
+ISP# clear ipbgp *
+ISP# show ip route
+
+d. Check the routing table for CustRtr. It should not have a route to 10.1.1.0 in its routing table.
+
+CustRtr# show ip route
+      10.0.0.0/8 is variably subnetted, 3 subnets, 2 masks
+B        10.2.2.0/24 [20/0] via 172.24.1.17, 00:00:32
+C        10.3.3.0/24 is directly connected, Loopback0
+L        10.3.3.1/32 is directly connected, Loopback0
+      172.24.0.0/16 is variably subnetted, 2 subnets, 2 masks
+C        172.24.1.16/30 is directly connected, Serial0/1
+L        172.24.1.18/32 is directly connected, Serial0/1
+CustRtr#
+e. Return to ISP and verify that the filter is working as intended. Issue the show ipbgpregexp ^100$ command.
+ISP# show ipbgpregexp ^100$
+BGP table version is 4, local router ID is 10.2.2.1
+Status codes: s suppressed, d damped, h history, * valid, > best, i - internal, 
+              r RIB-failure, S Stale, m multipath, b backup-path, f RT-Filter, 
+              x best-external, a additional-path, c RIB-compressed, 
+Origin codes: i - IGP, e - EGP, ? - incomplete
+RPKI validation codes: V valid, I invalid, N Not found
+
+     Network          Next Hop            Metric LocPrf Weight Path
+ *>  10.1.1.0/24      192.168.1.5              0             0 100 i
+ISP#
+The output of this command shows all matches for the regular expressions that were used in the access list. The path to 10.1.1.0 matches the access list and is filtered from updates to CustRtr.
+f. Run the following Tcl script on all routers to verify whether there is connectivity. All pings from ISP should be successful. SanJose should not be able to ping the CustRtr loopback 10.3.3.1 or the WAN link 172.24.1.16/30. CustRtr should not be able to ping the SanJose loopback 10.1.1.1 or the WAN link 192.168.1.4/30.
+ISP# tclsh
+
+foreach address {10.1.1.110.2.2.110.3.3.1192.168.1.5192.168.1.6172.24.1.17172.24.1.18} { ping $address }
+
