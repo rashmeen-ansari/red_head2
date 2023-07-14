@@ -1,0 +1,361 @@
+PRATICAL 6:Inter-VLAN Routing
+Topology
+
+
+Objectives
+Implement a Layer 3 EtherChannel
+Implement Static Routing
+Implement Inter-VLAN Routing
+Part 1: Configure Multilayer Switching using Distribution Layer Switches
+Step 1: Load base config
+Use the reset.tcl script you created in Lab 1 “Preparing the Switch” to set your switches up for this lab. Thenload the file BASE.CFG into the running-config with the command copy flash:BASE.CFG running-config. An example from DLS1:
+
+DLS1# tclshreset.tcl
+Erasing the nvram filesystem will remove all configuration files! Continue? [confirm]
+[OK]
+Erase of nvram: complete
+Reloading the switch in 1 minute, type reload cancel to halt
+
+Proceed with reload? [confirm]
+*Mar 7 18:41:40.403: %SYS-7-NV_BLOCK_INIT: Initialized the geometry of nvram
+*Mar 7 18:41:41.141: %SYS-5-RELOAD: Reload requested by console. Reload Reason:
+Reload command.
+<switch reloads - output omitted>
+
+Would you like to enter the initial configuration dialog? [yes/no]: n
+Switch>en
+*Mar 1 00:01:30.915: %LINK-5-CHANGED: Interface Vlan1, changed state to
+administratively down
+Switch# copy BASE.CFG running-config
+Destination filename [running-config]?
+184 bytes copied in 0.310 secs (594 bytes/sec)
+DLS1#
+
+Step 2: Verify switch management database configuration
+At each switch, use the show sdm prefer command to verify the appropriate template is chosen. The DLS switches should be using the "dual ipv4-and-ipv6 routing" template and the ALS switches should be using the "lanbase-routing" template. If any of the switches are using the wrong template, make the necessary change and reboot the switch with the reload command.  An example from ALS1 is below:
+
+ALS1# shosdmpref
+The current template is "default" template.
+<output omitted>
+ALS1# conf t
+
+Enter configuration commands, one per line.  End with CNTL/Z.
+ALS1(config)# sdmpreflanbase-routing
+Changes to the running SDM preferences have been stored, but cannot take effect 
+until the next reload.
+Use 'show sdm prefer' to see what SDM preference is currently active.
+ALS1(config)# end
+ALS1# reload
+
+System configuration has been modified. Save? [yes/no]: y
+*Mar  1 02:12:00.699: %SYS-5-CONFIG_I: Configured from console by console
+Building configuration...
+[OK]
+Proceed with reload? [confirm]
+
+Step 3: Configure layer 3 interfaces on the DLS switches
+Switch	Interface	Address/Mask
+DLS1	VLAN 99	10.1.99.1/24
+DLS1	Loopback 1	172.16.1.1/24
+DLS2	VLAN 110	10.1.110.1/24
+DLS2	VLAN 120	10.1.120.1/24
+DLS2	Loopback 1	192.168.2.1/24
+
+An example from DLS2:
+DLS2(config)# ip routing
+DLS2(config)# vlan 110
+DLS2(config-vlan)#name Management
+DLS2(config-vlan)#exit
+DLS2(config)# vlan 120
+DLS2(config-vlan)#name Local
+DLS2(config-vlan)#exit
+DLS2(config)# int vlan 110
+DLS2(config-if)#ip address 10.1.110.1 255.255.255.0
+DLS2(config-if)#no shut
+DLS2(config-if)#exit
+DLS2(config)# int vlan 120
+DLS2(config-if)#ip address 10.1.120.1 255.255.255.0
+DLS2(config-if)#no shut
+DLS2(config-if)#exit
+DLS2(config)# int loopback 1
+DLS2(config-if)#ip address 192.168.1.1 255.255.255.0
+DLS2(config-if)#no shut
+DLS2(config-if)#exit
+DLS2(config)#
+
+At this point, basic intervlan routing can be demonstrated using an attached host. Host D is attached to DLS2 via interface Fa0/6. On DLS2, assign interface Fa0/6 to VLAN 110 and configure the host with the address 10.1.110.50/24 and default gateway of 10.1.110.1. Once you have done that, try and ping Loopback 1’s IP address (192.168.1.1). This should work just like a hardware router; the switch will provide connectivity between two directly connected interfaces. In the output below, the switchport host macro was used to quickly configure interface Fa0/6 with host-relative commands
+
+DLS2(config)# int f0/6
+DLS2(config-if)#switchport host
+switchport mode will be set to access
+spanning-tree portfast will be enabled
+channel group will be disabled
+DLS2(config-if)#switchport access vlan 110
+DLS2(config-if)#no shut
+DLS2(config-if)#exit
+DLS2(config)#
+
+
+
+Step 4: Configure a Layer 3 Etherchannel between DLS1 and DLS2
+Now you will interconnect the multilayer switches in preparation to demonstrate other routing capabilities. Configure a layer 3 EtherChannel between the DLS switches. This will provide the benefit of increased available bandwidth between the two multilayer switches.  To convert the links from layer 2 to layer 3, issue the no switchport command. Then, combine interfaces F0/11 and F0/12 into a single PAgP EtherChannel and then assign an IP address as shown. 
+
+DLS1	172.16.12.1/30	DLS2	172.16.12.2/30
+Example from DLS1:
+
+DLS1(config)# interface range f0/11-12
+DLS1(config-if-range)#no switchport
+DLS1(config-if-range)#channel-group 2 mode desirable
+Creating a port-channel interface Port-channel 2
+
+DLS1(config-if-range)#no shut
+DLS1(config-if-range)#exit
+DLS1(config)# interface port-channel 2
+DLS1(config-if)#ipaddress 172.16.12.1 255.255.255.252
+DLS1(config-if)#no shut
+DLS1(config-if)#exit
+DLS1(config)#
+
+Once you have configured both sides, verify that the EtherChannel link is up
+
+DLS2# show etherchannel summary
+Flags:  D - down        P - bundled in port-channel
+        I - stand-alone s - suspended
+        H - Hot-standby (LACP only)
+        R - Layer3      S - Layer2
+        U - in use      f - failed to allocate aggregator
+
+        M - not in use, minimum links not met
+        u - unsuitable for bundling
+        w - waiting to be aggregated
+        d - default port
+
+Number of channel-groups in use: 1
+Number of aggregators:           1
+
+Group  Port-channel  Protocol    Ports
+------+-------------+-----------+-----------------------------------------------
+2      Po2(RU)   PAgP      Fa0/11(P)   Fa0/12(P)
+
+DLS2# ping 172.16.12.1
+Type escape sequence to abort.
+Sending 5, 100-byte ICMP Echos to 172.16.12.1, timeout is 2 seconds:.!!!!
+Success rate is 80 percent (4/5), round-trip min/avg/max = 1/3/9 ms
+Step 5: Configure default routing between DLS switches
+At this point, local routing is support at each distribution layer switch. Now to provide reachability across the layer 3 EtherChannel trunk, configure fully qualified static default routes at DLS1 and DLS2 that point to each other.  From DLS1:
+
+DLS1(config)# ip route 0.0.0.0 0.0.0.0 port-channel 2
+%Default route without gateway, if not a point-to-point interface, may impact performance
+DLS1(config)# ip route 0.0.0.0 0.0.0.0 port-channel 2 172.16.12.2
+DLS1(config)#
+
+Once done at both ends, verify connectivity by pinging from one switch to the other. In the example below, DLS2 pings the Loopback 1 interface at DLS1.
+
+DLS2# show ip route
+Codes: L - local, C - connected, S - static, R - RIP, M - mobile, B - BGP
+<output omitted>
+
+Gateway of last resort is 172.16.12.1 to network 0.0.0.0
+
+S*    0.0.0.0/0 [1/0] via 172.16.12.1, Port-channel2
+      10.0.0.0/8 is variably subnetted, 2 subnets, 2 masks
+C        10.1.110.0/24 is directly connected, Vlan110
+L        10.1.110.1/32 is directly connected, Vlan110
+      172.16.0.0/16 is variably subnetted, 2 subnets, 2 masks
+C        172.16.12.0/30 is directly connected, Port-channel2
+L        172.16.12.2/32 is directly connected, Port-channel2
+      192.168.1.0/24 is variably subnetted, 2 subnets, 2 masks
+C        192.168.1.0/24 is directly connected, Loopback1
+L        192.168.1.1/32 is directly connected, Loopback1
+DLS2# ping 172.16.1.1
+Type escape sequence to abort.
+Sending 5, 100-byte ICMP Echos to 172.16.1.1, timeout is 2 seconds:
+!!!!!
+Success rate is 100 percent (5/5), round-trip min/avg/max = 1/4/9 ms
+DLS2#
+
+Step 6: Configure the remaining EtherChannels for the topology
+Configure the remaining EtherChannel links as layer 2 PagP trunks using VLAN 1 as the native VLAN.
+Endpoint 1	Channel number	Endpoint 2	VLANs Allowed
+ALS1 F0/7-8	1	DLS1 F0/7-8	All except 110
+ALS1 F0/9-10	4	DLS2 F0/9-10	110 Only
+ALS2 F0/7-8	3	DLS2 F0/7-8	All
+
+Example from ALS1:
+ALS1(config)# interface range f0/7-8
+ALS1(config-if-range)#switchport mode trunk
+ALS1(config-if-range)#switchport trunk allowed vlan except 110
+ALS1(config-if-range)#channel-group 1 mode desirable
+Creating a port-channel interface Port-channel 1
+
+ALS1(config-if-range)#no shut
+ALS1(config-if-range)#exit
+ALS1(config)# interface range f0/9-10
+ALS1(config-if-range)#switchport mode trunk
+ALS1(config-if-range)#switchport trunk allowed vlan 110
+ALS1(config-if-range)#channel-group 4 mode desirable
+Creating a port-channel interface Port-channel 4
+
+ALS1(config-if-range)#no shut
+ALS1(config-if-range)#exit
+ALS1(config)#end
+ALS1# show etherchannel summary
+Flags:  D - down        P - bundled in port-channel
+        I - stand-alone s - suspended
+        H - Hot-standby (LACP only)
+        R - Layer3      S - Layer2
+        U - in use      f - failed to allocate aggregator
+
+        M - not in use, minimum links not met
+        u - unsuitable for bundling
+        w - waiting to be aggregated
+        d - default port
+
+Number of channel-groups in use: 2
+Number of aggregators:           2
+
+Group  Port-channel  Protocol    Ports
+------+-------------+-----------+-----------------------------------------------
+1      Po1(SU)   PAgP      Fa0/7(P)    Fa0/8(P)    
+4      Po4(SU)   PAgP      Fa0/9(P)    Fa0/10(P)
+
+ALS1# show interface trunk
+Port        Mode             Encapsulation  Status        Native vlan
+Po1         on               802.1q         trunking      1
+Po4         on               802.1q         trunking      1
+
+Port        Vlans allowed on trunk
+Po1         1-109,111-4094
+Po4         110
+ALS1#
+
+Step 7: Enable and Verify Layer 3 connectivity across the network
+In this step we will enable basic connectivity from the management VLANs on both sides of the network. 
+Create the management VLANs (99 at ALS1, 120 at ALS2)
+Configure interface VLAN 99 at ALS1 and interface VLAN 120 at ALS2
+Assign addresses (refer to the diagram) and default gateways (at DLS1/DLS2 respectively).
+
+Once that is all done, pings across the network should work, flowing across the layer 3 EtherChannel. An example from ALS2:
+
+ALS2(config)# vlan 120
+ALS2(config-vlan)#name Management
+ALS2(config-vlan)#exit
+ALS2(config)# int vlan 120
+ALS2(config-if)#ip address 10.1.120.2 255.255.255.0
+ALS2(config-if)#no shut
+ALS2(config-if)#exit
+ALS2(config)# ip default-gateway 10.1.120.1
+ALS2(config)# end
+
+ALS2# ping 10.1.99.2
+Type escape sequence to abort.
+Sending 5, 100-byte ICMP Echos to 10.1.99.2, timeout is 2 seconds:
+..!!!
+Success rate is 60 percent (3/5), round-trip min/avg/max = 1/3/8 ms
+ALS2#
+ALS2# traceroute 10.1.99.2
+Type escape sequence to abort.
+Tracing the route to 10.1.99.2
+VRF info: (vrf in name/id, vrf out name/id)
+  1 10.1.120.1 0 msec 0 msec 8 msec
+  2 172.16.12.1 0 msec 0 msec 8 msec
+  3 10.1.99.2 0 msec 0 msec *
+ALS2#
+
+Part 2: Configure Multilayer Switching at ALS1
+At this point all routing is going through the DLS switches, and the port channel between ALS1 and DLS2 is not passing anything but control traffic (BPDUs, etc). 
+The Cisco 2960 is able to support basic routing when it is using the LANBASE IOS. In this step you will configure ALS1 to support multiple SVIs and configure it for basic static routing. The objectives of this step are:
+Enable intervlan routing between two VLANs locally at ALS1 
+Enable IP Routing
+Configure a static route for DLS2's Lo1 network travel via Port-Channel 4.
+
+Step 1: Configure additional VLANs and VLAN interfaces
+At ALS1, create VLAN 100 and VLAN 110 and then create SVIs for those VLANs:
+
+ALS1(config)# ip routing
+ALS1(config)# vlan 100
+ALS1(config-vlan)#name Local
+ALS1(config-vlan)#exit
+ALS1(config)# vlan 110
+ALS1(config-vlan)#name InterNode
+ALS1(config-vlan)#exit
+ALS1(config)# int vlan 100
+ALS1(config-if)#ip address 10.1.100.1 255.255.255.0
+ALS1(config-if)#no shut
+ALS1(config-if)#exit
+ALS1(config)# int vlan 110
+ALS1(config-if)#ip address 10.1.110.2 255.255.255.0
+ALS1(config-if)#no shut
+ALS1(config-if)#exit
+ALS1(config)#
+
+Step 2: Configure and test Host Access
+Assign interface Fa0/6 to VLAN 100. On the attached host (Host A) configure the IP address 10.1.100.50/24 with a default gateway of 10.1.100.1. Once configured, try a traceroute from the host to 10.1.99.2 and observe the results. 
+In the output below, the switchport host macro was used to quickly configure interface Fa0/6 with host-relative commands.
+
+ALS1(config)# interface f0/6
+ALS1(config-if)#switchport host
+switchport mode will be set to access
+spanning-tree portfast will be enabled
+channel group will be disabled
+
+ALS1(config-if)#switchport access vlan 100
+ALS1(config-if)#no shut
+ALS1(config-if)#exit
+
+
+The output from the host shows that attempts to communicate with interface VLAN 99 at ALS1 were fulfilled locally, and not sent to DLS1 for routing.
+
+Step 3: Configure and verify static routing across the network
+At this point, local routing (at ALS1) works, and off-net routing (outside of ALS1) will not work, because DLS1 doesn't have any knowledge of the 10.1.100.0 subnet. In this step you will configure routing on several different switches:
+At DLS1, configure:
+oa static route to the 10.1.100.0/24 network via VLAN 99
+At DLS2, configure 
+oa static route to the 10.1.100.0/24 network via VLAN 110
+At ALS1, configure 
+oa static route to the 192.168.1.0/24 network via VLAN 110
+oa default static route to use 10.1.99.1
+Here is an example from ALS1:
+
+ALS1(config)# ip route 192.168.1.0 255.255.255.0 vlan 110
+ALS1(config)# ip route 0.0.0.0 0.0.0.0 10.1.99.1
+ALS1(config)# end
+ALS1# show ip route
+Codes: L - local, C - connected, S - static, R - RIP, M - mobile, B - BGP
+       D - EIGRP, EX - EIGRP external, O - OSPF, IA - OSPF inter area 
+       N1 - OSPF NSSA external type 1, N2 - OSPF NSSA external type 2
+       E1 - OSPF external type 1, E2 - OSPF external type 2
+i - IS-IS, su - IS-IS summary, L1 - IS-IS level-1, L2 - IS-IS level-2
+ia - IS-IS inter area, * - candidate default, U - per-user static route
+       o - ODR, P - periodic downloaded static route, H - NHRP, l - LISP
+       + - replicated route, % - next hop override
+Gateway of last resort is 10.1.99.1 to network 0.0.0.0
+S*    0.0.0.0/0 [1/0] via 10.1.99.1
+      10.0.0.0/8 is variably subnetted, 6 subnets, 2 masks
+C        10.1.99.0/24 is directly connected, Vlan99
+L        10.1.99.2/32 is directly connected, Vlan99
+C        10.1.100.0/24 is directly connected, Vlan100
+L        10.1.100.1/32 is directly connected, Vlan100
+C        10.1.110.0/24 is directly connected, Vlan110
+L        10.1.110.2/32 is directly connected, Vlan110
+S     192.168.1.0/24 is directly connected, Vlan110
+After configuring all of the required routes, test to see that the network behaves as expected.
+From ALS1, a traceroute to 10.1.120.2 should take three hops:
+
+ALS1# traceroute 10.1.120.2
+Type escape sequence to abort.
+Tracing the route to 10.1.120.2
+VRF info: (vrf in name/id, vrf out name/id)
+  1 10.1.99.1 0 msec 0 msec 0 msec
+  2 172.16.12.2 9 msec 0 msec 0 msec
+  3 10.1.120.2 0 msec 8 msec *
+
+From ALS1, a traceroute to 192.168.1.1 should take one hop:
+ALS1# traceroute 192.168.1.1
+Type escape sequence to abort.
+Tracing the route to 192.168.1.1
+VRF info: (vrf in name/id, vrf out name/id)
+  1 10.1.110.1 0 msec 0 msec * 
+
+Traces from Host A show an additional hop, but follow the appointed path:
+  
